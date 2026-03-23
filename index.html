@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>동물 친구들 3x3 타이쿤</title>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+    
+    <style>
+        body { font-family: 'Pretendard', sans-serif; background-color: #f7f3e9; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .score-board { font-size: 24px; font-weight: bold; color: #333; margin-bottom: 10px; }
+        #grid { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 10px; width: 320px; height: 320px; }
+        .cell { background-color: #e2dcd0; border-radius: 15px; width: 100%; height: 100%; position: relative; display: flex; align-items: center; justify-content: center; cursor: pointer; user-select: none; overflow: hidden; }
+        .target { width: 90%; height: 90%; object-fit: cover; border-radius: 50%; position: absolute; pointer-events: auto; }
+        .poop { font-size: 60px; pointer-height: 1; line-height: 1; pointer-events: auto; margin-top: -5px; }
+        .floating-text { position: absolute; font-size: 20px; font-weight: bold; pointer-events: none; animation: floatUp 1s ease-out forwards; z-index: 10; }
+        @keyframes floatUp { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-30px); } }
+        .shake { animation: shake 0.5s; }
+        @keyframes shake { 0% { transform: translate(1px, 1px) rotate(0deg); } 10% { transform: translate(-1px, -2px) rotate(-1deg); } 20% { transform: translate(-3px, 0px) rotate(1deg); } 30% { transform: translate(3px, 2px) rotate(0deg); } 40% { transform: translate(1px, -1px) rotate(1deg); } 50% { transform: translate(-1px, 2px) rotate(-1deg); } 60% { transform: translate(-3px, 1px) rotate(0deg); } 70% { transform: translate(3px, 1px) rotate(-1deg); } 80% { transform: translate(-1px, -1px) rotate(1deg); } 90% { transform: translate(1px, 2px) rotate(0deg); } 100% { transform: translate(1px, -2px) rotate(-1deg); } }
+        #startBtn { padding: 15px 40px; font-size: 20px; font-weight: bold; background-color: #4a3b32; color: white; border: none; border-radius: 30px; margin-top: 30px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        
+        /* 랭킹 팝업창 디자인 */
+        #rankingBoard { display: none; position: absolute; top: 10%; left: 50%; transform: translateX(-50%); background: white; padding: 25px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); z-index: 100; width: 85%; max-width: 320px; text-align: center; max-height: 80vh; overflow-y: auto; }
+        #rankingList { text-align: left; line-height: 2; font-size: 16px; margin-bottom: 20px; color: #333; }
+        .rank-item { padding: 5px 0; border-bottom: 1px dashed #eee; display: flex; justify-content: space-between; }
+        .rank-name { font-weight: bold; }
+        .rank-score { color: #d35400; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="score-board">🏆 점수: <span id="score">0</span> | ⏱️ 시간: <span id="time">30</span>초</div>
+        <button onclick="showRankings()" style="background:none; border:none; color:#007BFF; text-decoration:underline; cursor:pointer; font-size:16px;">명예의 전당 보기</button>
+    </div>
+    
+    <div id="grid"></div>
+    <button id="startBtn" onclick="startGame()">▶ 게임 시작</button>
+
+    <div id="rankingBoard">
+        <h2 style="margin-top:0; color:#4a3b32;">🏆 TOP 10 명예의 전당 🏆</h2>
+        <div id="rankingList">데이터를 불러오는 중...⏳</div>
+        <button onclick="document.getElementById('rankingBoard').style.display='none'" style="padding:10px 30px; border:none; background:#4a3b32; color:white; border-radius:15px; font-weight:bold; cursor:pointer;">닫기</button>
+    </div>
+
+    <script>
+        // 🔥 아까 복사한 파이어베이스 열쇠를 이 아래에 다시 꼭 넣어주세요! 🔥
+        const firebaseConfig = {
+            apiKey: "AIzaSyCWpA5Nn4WkkYMWnn60_GqC7sa2MwGHjkg",
+            authDomain: "ssam-ecb4b.firebaseapp.com",
+            projectId: "ssam-ecb4b",
+            storageBucket: "ssam-ecb4b.firebasestorage.app",
+            messagingSenderId: "640898689814",
+            appId: "1:640898689814:web:1eeecef9b0c216cbf27e37"
+        };
+        // 🔥 여기까지 덮어쓰기 🔥
+
+        // 파이어베이스 장부 켜기
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        // 새로 교체된 이미지 배열
+        const regularPets = [
+            'https://i.imgur.com/Dnx8i34.png', // 산이
+            'https://i.imgur.com/iSlSF68.png', // 순돌이
+            'https://i.imgur.com/5Qu6Iv3.png', // 안경이
+            'https://i.imgur.com/pzmt4HM.png'  // 진돌이
+        ];
+        const specialPet = 'https://i.imgur.com/eYD6HJK.png'; // 먹돌이
+        
+        let score = 0, time = 30, gameInterval, timerInterval, isPlaying = false;
+        let audioCtx;
+
+        function initAudio() { if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } if (audioCtx.state === 'suspended') { audioCtx.resume(); } }
+        function playSound(type) {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            if (type === 'regular') { osc.type = 'sine'; osc.frequency.setValueAtTime(400, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.1); gain.gain.setValueAtTime(0.5, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1); osc.start(); osc.stop(audioCtx.currentTime + 0.1); } 
+            else if (type === 'special') { osc.type = 'triangle'; osc.frequency.setValueAtTime(600, audioCtx.currentTime); osc.frequency.linearRampToValueAtTime(1200, audioCtx.currentTime + 0.2); gain.gain.setValueAtTime(0.5, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2); osc.start(); osc.stop(audioCtx.currentTime + 0.2); } 
+            else if (type === 'poop') { osc.type = 'sawtooth'; osc.frequency.setValueAtTime(150, audioCtx.currentTime); osc.frequency.linearRampToValueAtTime(80, audioCtx.currentTime + 0.3); gain.gain.setValueAtTime(0.5, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3); osc.start(); osc.stop(audioCtx.currentTime + 0.3); }
+        }
+
+        const grid = document.getElementById('grid');
+        for (let i = 0; i < 9; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'cell';
+            cell.dataset.index = i;
+            cell.addEventListener('mousedown', (e) => handleMiss(e, cell));
+            cell.addEventListener('touchstart', (e) => { e.preventDefault(); handleMiss(e, cell); });
+            grid.appendChild(cell);
+        }
+
+        function showFloatingText(cell, text, color) {
+            const el = document.createElement('div');
+            el.className = 'floating-text'; el.innerText = text; el.style.color = color;
+            cell.appendChild(el); setTimeout(() => el.remove(), 1000);
+        }
+
+        function updateScore(points) { score += points; document.getElementById('score').innerText = score; }
+
+        function handleHit(e, type, cell) {
+            e.stopPropagation();
+            if (!isPlaying) return;
+            initAudio();
+            const target = cell.querySelector('.target, .poop');
+            if (target) target.remove();
+            
+            // 점수 및 플로팅 텍스트 반영
+            if (type === 'regular') { playSound('regular'); updateScore(10); showFloatingText(cell, '🍀', '#4CAF50'); } 
+            else if (type === 'special') { playSound('special'); updateScore(20); showFloatingText(cell, '먹돌이!', '#FF9800'); } 
+            else if (type === 'poop') { playSound('poop'); updateScore(-30); showFloatingText(cell, '킹받쥬? 🤪', '#F44336'); document.body.classList.add('shake'); setTimeout(() => document.body.classList.remove('shake'), 500); clearGrid(); }
+        }
+
+        function handleMiss(e, cell) {
+            if (!isPlaying || cell.querySelector('.target, .poop')) return; 
+            updateScore(-10); showFloatingText(cell, '-10', '#999');
+        }
+
+        function clearGrid() { document.querySelectorAll('.target, .poop').forEach(el => el.remove()); }
+
+        function spawn() {
+            if (!isPlaying) return;
+            clearGrid();
+            const cells = document.querySelectorAll('.cell');
+            const randomCell = cells[Math.floor(Math.random() * cells.length)];
+            const rand = Math.random();
+            let el;
+            
+            // 출현 확률 및 타겟 설정
+            if (rand < 0.5) { el = document.createElement('img'); el.src = regularPets[Math.floor(Math.random() * regularPets.length)]; el.className = 'target'; el.addEventListener('mousedown', (e) => handleHit(e, 'regular', randomCell)); el.addEventListener('touchstart', (e) => { e.preventDefault(); handleHit(e, 'regular', randomCell); }); } 
+            else if (rand < 0.8) { el = document.createElement('img'); el.src = specialPet; el.className = 'target'; el.addEventListener('mousedown', (e) => handleHit(e, 'special', randomCell)); el.addEventListener('touchstart', (e) => { e.preventDefault(); handleHit(e, 'special', randomCell); }); } 
+            else { el = document.createElement('div'); el.innerText = '💩'; el.className = 'poop'; el.addEventListener('mousedown', (e) => handleHit(e, 'poop', randomCell)); el.addEventListener('touchstart', (e) => { e.preventDefault(); handleHit(e, 'poop', randomCell); }); }
+            
+            randomCell.appendChild(el);
+        }
+
+        function startGame() {
+            initAudio();
+            document.getElementById('startBtn').style.display = 'none';
+            score = 0; time = 30; updateScore(0); document.getElementById('time').innerText = time;
+            isPlaying = true;
+            clearGrid();
+            
+            gameInterval = setInterval(spawn, 800);
+            timerInterval = setInterval(() => {
+                time--; document.getElementById('time').innerText = time;
+                if (time <= 0) {
+                    isPlaying = false;
+                    clearInterval(gameInterval); clearInterval(timerInterval);
+                    clearGrid();
+                    endGameAndSaveRanking(); 
+                }
+            }, 1000);
+        }
+
+        // 🌟 도배 방지 기능이 추가된 랭킹 저장 🌟
+        function endGameAndSaveRanking() {
+            setTimeout(() => {
+                let playerName = prompt(`게임 종료! 최종 점수: ${score}점\n명예의 전당에 등록할 닉네임을 입력하세요!`);
+                
+                if (playerName) { 
+                    const playerRef = db.collection("rankings").doc(playerName);
+                    
+                    playerRef.get().then((doc) => {
+                        if (doc.exists) {
+                            if (score > doc.data().score) {
+                                alert(`🎉 최고 기록 갱신! (${doc.data().score}점 ➡️ ${score}점)`);
+                                playerRef.update({ score: score, timestamp: firebase.firestore.FieldValue.serverTimestamp() }).then(() => showRankings());
+                            } else {
+                                alert(`아쉽네요! 본인 최고 기록(${doc.data().score}점)을 넘지 못했습니다.`);
+                                showRankings();
+                            }
+                        } else {
+                            playerRef.set({ name: playerName, score: score, timestamp: firebase.firestore.FieldValue.serverTimestamp() }).then(() => showRankings());
+                        }
+                    });
+                } else {
+                    showRankings();
+                }
+                
+                document.getElementById('startBtn').style.display = 'block';
+                document.getElementById('startBtn').innerText = '다시 하기';
+            }, 100);
+        }
+
+        // 🌟 상위 10명으로 확장해서 불러오기 🌟
+        function showRankings() {
+            const listDiv = document.getElementById('rankingList');
+            listDiv.innerHTML = "데이터 불러오는 중...⏳";
+            document.getElementById('rankingBoard').style.display = 'block';
+
+            db.collection("rankings").orderBy("score", "desc").limit(10).get().then((querySnapshot) => {
+                listDiv.innerHTML = "";
+                let rank = 1;
+                querySnapshot.forEach((doc) => {
+                    const data = doc.data();
+                    let medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
+                    listDiv.innerHTML += `<div class="rank-item"><span class="rank-name">${medal} ${data.name}</span> <span class="rank-score">${data.score}점</span></div>`;
+                    rank++;
+                });
+                if(listDiv.innerHTML === "") listDiv.innerHTML = "아직 등록된 랭킹이 없습니다! 첫 1등의 주인공이 되세요!";
+            }).catch((error) => {
+                listDiv.innerHTML = "랭킹을 불러오는데 실패했습니다.";
+                console.error(error);
+            });
+        }
+    </script>
+</body>
+</html>
